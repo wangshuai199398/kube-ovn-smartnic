@@ -67,8 +67,8 @@ func ParseFlags() (*Configuration, error) {
 		argDatabaseVswitchFileSystemIDPath = pflag.String("database.vswitch.file.system.id.path", "/etc/openvswitch/system-id.conf", "OVS system id file.")
 
 		argDatabaseNorthboundName          = pflag.String("database.northbound.name", "OVN_Northbound", "The name of OVN NB (northbound) db.")
-		argDatabaseNorthboundSocketRemote  = pflag.String("database.northbound.socket.remote", "unix:/run/ovn/ovnnb_db.sock", "JSON-RPC unix socket to OVN NB db.")
-		argDatabaseNorthboundSocketControl = pflag.String("database.northbound.socket.control", "unix:/run/ovn/ovnnb_db.ctl", "JSON-RPC unix socket to OVN NB app.")
+		argDatabaseNorthboundSocketRemote  = pflag.String("database.northbound.socket.remote", "unix:/var/run/ovn/ovnnb_db.sock", "JSON-RPC unix socket to OVN NB db.")
+		argDatabaseNorthboundSocketControl = pflag.String("database.northbound.socket.control", "unix:/var/run/ovn/ovnnb_db.ctl", "JSON-RPC unix socket to OVN NB app.")
 		argDatabaseNorthboundFileDataPath  = pflag.String("database.northbound.file.data.path", "/etc/ovn/ovnnb_db.db", "OVN NB db file.")
 		argDatabaseNorthboundFileLogPath   = pflag.String("database.northbound.file.log.path", "/var/log/ovn/ovsdb-server-nb.log", "OVN NB db log file.")
 		argDatabaseNorthboundFilePidPath   = pflag.String("database.northbound.file.pid.path", "/run/ovn/ovnnb_db.pid", "OVN NB db process id file.")
@@ -77,8 +77,8 @@ func ParseFlags() (*Configuration, error) {
 		argDatabaseNorthboundPortRaft      = pflag.Int("database.northbound.port.raft", 6643, "OVN NB db network port for clustering (raft)")
 
 		argDatabaseSouthboundName          = pflag.String("database.southbound.name", "OVN_Southbound", "The name of OVN SB (southbound) db.")
-		argDatabaseSouthboundSocketRemote  = pflag.String("database.southbound.socket.remote", "unix:/run/ovn/ovnsb_db.sock", "JSON-RPC unix socket to OVN SB db.")
-		argDatabaseSouthboundSocketControl = pflag.String("database.southbound.socket.control", "unix:/run/ovn/ovnsb_db.ctl", "JSON-RPC unix socket to OVN SB app.")
+		argDatabaseSouthboundSocketRemote  = pflag.String("database.southbound.socket.remote", "unix:/var/run/ovn/ovnsb_db.sock", "JSON-RPC unix socket to OVN SB db.")
+		argDatabaseSouthboundSocketControl = pflag.String("database.southbound.socket.control", "unix:/var/run/ovn/ovnsb_db.ctl", "JSON-RPC unix socket to OVN SB app.")
 		argDatabaseSouthboundFileDataPath  = pflag.String("database.southbound.file.data.path", "/etc/ovn/ovnsb_db.db", "OVN SB db file.")
 		argDatabaseSouthboundFileLogPath   = pflag.String("database.southbound.file.log.path", "/var/log/ovn/ovsdb-server-sb.log", "OVN SB db log file.")
 		argDatabaseSouthboundFilePidPath   = pflag.String("database.southbound.file.pid.path", "/run/ovn/ovnsb_db.pid", "OVN SB db process id file.")

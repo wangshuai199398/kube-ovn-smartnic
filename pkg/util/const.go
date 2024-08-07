@@ -310,4 +310,10 @@ const (
 	MigrationPhaseStarted         = "started"
 	MigrationPhaseSucceeded       = "succeeded"
 	MigrationPhaseFailed          = "failed"
+
+	YusurId                    = "1f47 1101"
+	KubeVirtVdpa               = "kubevirt.io/dpdk-vdpa"
+	Ysk2DriverPci              = "/sys/bus/pci/drivers/ysnic_k2"
+	VfioDriverPci              = "/sys/bus/pci/drivers/vfio-pci"
+	VhostUserVdpaPciAnnotation = "kubevirt.v1.io/vhostuser-vdpa-pci"
 )

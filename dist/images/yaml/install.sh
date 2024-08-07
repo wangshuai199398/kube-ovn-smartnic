@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+kubectl label nodes master ovn.kubernetes.io/ovs_dp_type="userspace" --overwrite
+kubectl label nodes yusur ovn.kubernetes.io/ovs_dp_type="userspace" --overwrite
+
 IPV6=${IPV6:-false}
 DUAL_STACK=${DUAL_STACK:-false}
 ENABLE_SSL=${ENABLE_SSL:-false}
@@ -42,7 +45,7 @@ SECURE_SERVING=${SECURE_SERVING:-false}
 
 # debug
 DEBUG_WRAPPER=${DEBUG_WRAPPER:-}
-RUN_AS_USER=65534 # run as nobody
+RUN_AS_USER=0 # run as nobody
 if [ -n "$DEBUG_WRAPPER" ]; then
   RUN_AS_USER=0
 fi
@@ -55,7 +58,7 @@ CNI_BIN_DIR="/opt/cni/bin"
 
 REGISTRY="harbor.yusur.tech/yusur_ovn"
 VPC_NAT_IMAGE="vpc-nat-gateway"
-VERSION="v1.13.4"
+VERSION="v1.13.0"
 IMAGE_PULL_POLICY="IfNotPresent"
 POD_CIDR="10.244.0.0/16"                     # Do NOT overlap with NODE/SVC/JOIN CIDR
 POD_GATEWAY="10.244.0.1"
@@ -3480,7 +3483,7 @@ spec:
           - /kube-ovn/start-db.sh
           securityContext:
             runAsUser: ${RUN_AS_USER}
-            privileged: false
+            privileged: true
             capabilities:
               add:
                 - NET_BIND_SERVICE
@@ -3578,374 +3581,6 @@ spec:
 EOF
 
 kubectl apply -f ovn.yaml
-
-if $DPDK; then
-  cat <<EOF > ovs-ovn-ds.yaml
-kind: DaemonSet
-apiVersion: apps/v1
-metadata:
-  name: ovs-ovn
-  namespace: kube-system
-  annotations:
-    kubernetes.io/description: |
-      This daemon set launches the openvswitch daemon.
-spec:
-  selector:
-    matchLabels:
-      app: ovs-dpdk
-  updateStrategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
-  template:
-    metadata:
-      labels:
-        app: ovs-dpdk
-        component: network
-        type: infra
-    spec:
-      tolerations:
-        - effect: NoSchedule
-          operator: Exists
-        - effect: NoExecute
-          operator: Exists
-        - key: CriticalAddonsOnly
-          operator: Exists
-      priorityClassName: system-node-critical
-      serviceAccountName: ovn-ovs
-      hostNetwork: true
-      hostPID: true
-      containers:
-        - name: openvswitch
-          image: "$REGISTRY/kube-ovn-dpdk:$DPDK_VERSION-$VERSION"
-          imagePullPolicy: $IMAGE_PULL_POLICY
-          command: ["/kube-ovn/start-ovs-dpdk.sh"]
-          securityContext:
-            runAsUser: 0
-            privileged: true
-          env:
-            - name: ENABLE_SSL
-              value: "$ENABLE_SSL"
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: KUBE_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-            - name: OVN_DB_IPS
-              value: $addresses
-            - name: OVN_REMOTE_PROBE_INTERVAL
-              value: "10000"
-            - name: OVN_REMOTE_OPENFLOW_INTERVAL
-              value: "180"
-          volumeMounts:
-            - mountPath: /var/run/netns
-              name: host-ns
-              mountPropagation: HostToContainer
-            - mountPath: /lib/modules
-              name: host-modules
-              readOnly: true
-            - mountPath: /var/run/openvswitch
-              name: host-run-ovs
-            - mountPath: /var/run/ovn
-              name: host-run-ovn
-            - mountPath: /sys
-              name: host-sys
-              readOnly: true
-            - mountPath: /etc/cni/net.d
-              name: cni-conf
-            - mountPath: /etc/openvswitch
-              name: host-config-openvswitch
-            - mountPath: /etc/ovn
-              name: host-config-ovn
-            - mountPath: /var/log/openvswitch
-              name: host-log-ovs
-            - mountPath: /var/log/ovn
-              name: host-log-ovn
-            - mountPath: /opt/ovs-config
-              name: host-config-ovs
-            - mountPath: /dev/hugepages
-              name: hugepage
-            - mountPath: /etc/localtime
-              name: localtime
-            - mountPath: /var/run/tls
-              name: kube-ovn-tls
-          readinessProbe:
-            exec:
-              command:
-                - bash
-                - /kube-ovn/ovs-dpdk-healthcheck.sh
-            periodSeconds: 5
-            timeoutSeconds: 45
-          livenessProbe:
-            exec:
-              command:
-                - bash
-                - /kube-ovn/ovs-dpdk-healthcheck.sh
-            initialDelaySeconds: 60
-            periodSeconds: 5
-            failureThreshold: 5
-            timeoutSeconds: 45
-          resources:
-            requests:
-              cpu: $DPDK_CPU
-              memory: $DPDK_MEMORY
-            limits:
-              cpu: $DPDK_CPU
-              memory: $DPDK_MEMORY
-              hugepages-1Gi: 1Gi
-      nodeSelector:
-        kubernetes.io/os: "linux"
-        ovn.kubernetes.io/ovs_dp_type: "kernel"
-      volumes:
-        - name: host-modules
-          hostPath:
-            path: /lib/modules
-        - name: host-run-ovs
-          hostPath:
-            path: /run/openvswitch
-        - name: host-run-ovn
-          hostPath:
-            path: /run/ovn
-        - name: host-sys
-          hostPath:
-            path: /sys
-        - name: host-ns
-          hostPath:
-            path: /var/run/netns
-        - name: cni-conf
-          hostPath:
-            path: /etc/cni/net.d
-        - name: host-config-openvswitch
-          hostPath:
-            path: /etc/origin/openvswitch
-        - name: host-config-ovn
-          hostPath:
-            path: /etc/origin/ovn
-        - name: host-log-ovs
-          hostPath:
-            path: $LOG_DIR/openvswitch
-        - name: host-log-ovn
-          hostPath:
-            path: $LOG_DIR/ovn
-        - name: host-config-ovs
-          hostPath:
-            path: /opt/ovs-config
-            type: DirectoryOrCreate
-        - name: hugepage
-          emptyDir:
-            medium: HugePages
-        - name: localtime
-          hostPath:
-            path: /etc/localtime
-        - name: kube-ovn-tls
-          secret:
-            optional: true
-            secretName: kube-ovn-tls
-EOF
-
-else
-  cat <<EOF > ovs-ovn-ds.yaml
----
-kind: DaemonSet
-apiVersion: apps/v1
-metadata:
-  name: ovs-ovn
-  namespace: kube-system
-  annotations:
-    kubernetes.io/description: |
-      This daemon set launches the openvswitch daemon.
-spec:
-  selector:
-    matchLabels:
-      app: ovs
-  updateStrategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
-  template:
-    metadata:
-      labels:
-        app: ovs
-        component: network
-        type: infra
-    spec:
-      tolerations:
-        - effect: NoSchedule
-          operator: Exists
-        - effect: NoExecute
-          operator: Exists
-        - key: CriticalAddonsOnly
-          operator: Exists
-      priorityClassName: system-node-critical
-      serviceAccountName: ovn-ovs
-      hostNetwork: true
-      hostPID: true
-      initContainers:
-        - name: hostpath-init
-          image: "$REGISTRY/kube-ovn:$VERSION"
-          command:
-            - sh
-            - -xec
-            - |
-              chown -R nobody: /var/run/ovn /var/log/ovn /etc/openvswitch /var/run/openvswitch /var/log/openvswitch
-              iptables -V
-          securityContext:
-            allowPrivilegeEscalation: true
-            capabilities:
-              drop:
-                - ALL
-            privileged: true
-            runAsUser: 0
-          volumeMounts:
-            - mountPath: /usr/local/sbin
-              name: usr-local-sbin
-            - mountPath: /var/log/ovn
-              name: host-log-ovn
-            - mountPath: /var/run/ovn
-              name: host-run-ovn
-            - mountPath: /etc/openvswitch
-              name: host-config-openvswitch
-            - mountPath: /var/run/openvswitch
-              name: host-run-ovs
-            - mountPath: /var/log/openvswitch
-              name: host-log-ovs
-      containers:
-        - name: openvswitch
-          image: "$REGISTRY/kube-ovn:$VERSION"
-          imagePullPolicy: $IMAGE_PULL_POLICY
-          command:
-          - /kube-ovn/start-ovs.sh
-          securityContext:
-            runAsUser: ${RUN_AS_USER}
-            privileged: false
-            capabilities:
-              add:
-                - NET_ADMIN
-                - NET_BIND_SERVICE
-                - SYS_MODULE
-                - SYS_NICE
-                - SYS_ADMIN
-          env:
-            - name: ENABLE_SSL
-              value: "$ENABLE_SSL"
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: HW_OFFLOAD
-              value: "$HW_OFFLOAD"
-            - name: TUNNEL_TYPE
-              value: "$TUNNEL_TYPE"
-            - name: KUBE_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-            - name: OVN_DB_IPS
-              value: $addresses
-            - name: DEBUG_WRAPPER
-              value: "$DEBUG_WRAPPER"
-            - name: OVN_REMOTE_PROBE_INTERVAL
-              value: "10000"
-            - name: OVN_REMOTE_OPENFLOW_INTERVAL
-              value: "180"
-          volumeMounts:
-            - mountPath: /usr/local/sbin
-              name: usr-local-sbin
-            - mountPath: /lib/modules
-              name: host-modules
-              readOnly: true
-            - mountPath: /var/run/openvswitch
-              name: host-run-ovs
-            - mountPath: /var/run/ovn
-              name: host-run-ovn
-            - mountPath: /etc/openvswitch
-              name: host-config-openvswitch
-            - mountPath: /var/log/openvswitch
-              name: host-log-ovs
-            - mountPath: /var/log/ovn
-              name: host-log-ovn
-            - mountPath: /etc/localtime
-              name: localtime
-              readOnly: true
-            - mountPath: /var/run/tls
-              name: kube-ovn-tls
-            - mountPath: /var/run/containerd
-              name: cruntime
-              readOnly: true
-          readinessProbe:
-            exec:
-              command:
-                - bash
-                - /kube-ovn/ovs-healthcheck.sh
-            initialDelaySeconds: 10
-            periodSeconds: 5
-            timeoutSeconds: 45
-          livenessProbe:
-            exec:
-              command:
-                - bash
-                - /kube-ovn/ovs-healthcheck.sh
-            initialDelaySeconds: 60
-            periodSeconds: 5
-            failureThreshold: 5
-            timeoutSeconds: 45
-          resources:
-            requests:
-              cpu: 200m
-              memory: 200Mi
-            limits:
-              cpu: "2"
-              memory: 1000Mi
-      nodeSelector:
-        kubernetes.io/os: "linux"
-      volumes:
-        - name: usr-local-sbin
-          emptyDir: {}
-        - name: host-modules
-          hostPath:
-            path: /lib/modules
-        - name: host-run-ovs
-          hostPath:
-            path: /run/openvswitch
-        - name: host-run-ovn
-          hostPath:
-            path: /run/ovn
-        - name: host-config-openvswitch
-          hostPath:
-            path: /etc/origin/openvswitch
-        - name: host-log-ovs
-          hostPath:
-            path: $LOG_DIR/openvswitch
-        - name: host-log-ovn
-          hostPath:
-            path: $LOG_DIR/ovn
-        - name: localtime
-          hostPath:
-            path: /etc/localtime
-        - hostPath:
-            path: /var/run/containerd
-          name: cruntime
-        - name: kube-ovn-tls
-          secret:
-            optional: true
-            secretName: kube-ovn-tls
-EOF
-fi
-
-kubectl apply -f ovs-ovn-ds.yaml
 
 if $HYBRID_DPDK; then
 
@@ -4083,7 +3718,7 @@ spec:
             path: /lib/modules
         - name: host-run-ovs
           hostPath:
-            path: /run/openvswitch
+            path: /var/run/openvswitch
         - name: host-run-ovn
           hostPath:
             path: /run/ovn
@@ -4092,7 +3727,7 @@ spec:
             path: /sys
         - name: host-config-openvswitch
           hostPath:
-            path: /etc/origin/openvswitch
+            path: /etc/openvswitch
         - name: host-config-ovn
           hostPath:
             path: /etc/origin/ovn
@@ -4112,8 +3747,9 @@ spec:
 EOF
 kubectl apply -f ovn-dpdk.yaml
 fi
+kubectl rollout status DaemonSet/ovs-ovn-dpdk -n kube-system --timeout 300s
 kubectl rollout status deployment/ovn-central -n kube-system --timeout 300s
-kubectl rollout status daemonset/ovs-ovn -n kube-system --timeout 120s
+#kubectl rollout status daemonset/ovs-ovn -n kube-system --timeout 120s
 echo "-------------------------------"
 echo ""
 
@@ -4243,7 +3879,7 @@ spec:
           - --secure-serving=${SECURE_SERVING}
           securityContext:
             runAsUser: ${RUN_AS_USER}
-            privileged: false
+            privileged: true
             capabilities:
               add:
                 - NET_BIND_SERVICE
@@ -4434,7 +4070,7 @@ spec:
         securityContext:
           runAsUser: ${RUN_AS_USER}
           runAsGroup: 0
-          privileged: false
+          privileged: true
           capabilities:
             add:
               - NET_ADMIN
@@ -4484,7 +4120,7 @@ spec:
           - mountPath: /etc/openvswitch
             name: systemid
             readOnly: true
-          - mountPath: /run/openvswitch
+          - mountPath: /var/run/openvswitch
             name: host-run-ovs
             mountPropagation: HostToContainer
           - mountPath: /run/ovn
@@ -4543,10 +4179,10 @@ spec:
             path: $KUBELET_DIR/pods
         - name: systemid
           hostPath:
-            path: /etc/origin/openvswitch
+            path: /etc/openvswitch
         - name: host-run-ovs
           hostPath:
-            path: /run/openvswitch
+            path: /var/run/openvswitch
         - name: host-run-ovn
           hostPath:
             path: /run/ovn
@@ -4635,7 +4271,7 @@ spec:
           imagePullPolicy: $IMAGE_PULL_POLICY
           securityContext:
             runAsUser: ${RUN_AS_USER}
-            privileged: false
+            privileged: true
             capabilities:
               add:
                 - NET_BIND_SERVICE
@@ -4691,13 +4327,13 @@ spec:
       volumes:
         - name: host-run-ovs
           hostPath:
-            path: /run/openvswitch
+            path: /var/run/openvswitch
         - name: host-run-ovn
           hostPath:
             path: /run/ovn
         - name: host-config-openvswitch
           hostPath:
-            path: /etc/origin/openvswitch
+            path: /etc/openvswitch
         - name: host-log-ovs
           hostPath:
             path: $LOG_DIR/openvswitch
@@ -4785,7 +4421,7 @@ spec:
           - --log_file_max_size=200
           securityContext:
             runAsUser: ${RUN_AS_USER}
-            privileged: false
+            privileged: true
             capabilities:
               add:
                 - NET_BIND_SERVICE
@@ -5095,7 +4731,7 @@ kubectl cp kube-system/"$(kubectl -n kube-system get pods -o wide | grep cni | a
 chmod +x /usr/local/bin/kubectl-ko
 # show pod status in kube-system namespace before diagnose
 kubectl get pod -n kube-system -o wide
-kubectl ko diagnose all
+#kubectl ko diagnose all
 
 echo "-------------------------------"
 echo "

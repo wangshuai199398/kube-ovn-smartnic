@@ -496,7 +496,16 @@ func (csh cniServerHandler) handleDel(req *restful.Request, resp *restful.Respon
 			podRequest.PodName = vmName
 		}
 
-		err = csh.deleteNic(podRequest.PodName, podRequest.PodNamespace, podRequest.ContainerID, podRequest.NetNs, podRequest.DeviceID, podRequest.IfName, nicType, podRequest.Provider)
+		isVdpaVm := false
+		if podRequest.DeviceID != "" && pod.Labels[util.KubeVirtVdpa] == "true" {
+			for _, owner := range pod.OwnerReferences {
+				if owner.Kind == util.VMInstance && strings.HasPrefix(owner.APIVersion, "kubevirt.io") {
+					isVdpaVm = true
+					break
+				}
+			}
+		}
+		err = csh.deleteNic(podRequest.PodName, podRequest.PodNamespace, podRequest.ContainerID, podRequest.NetNs, podRequest.DeviceID, podRequest.IfName, nicType, podRequest.Provider, isVdpaVm)
 		if err != nil {
 			errMsg := fmt.Errorf("del nic failed %w", err)
 			klog.Error(errMsg)

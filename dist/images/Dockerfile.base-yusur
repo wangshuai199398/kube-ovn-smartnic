@@ -1,0 +1,117 @@
+# syntax = docker/dockerfile:experimental
+FROM ubuntu:22.04 AS ovs-builder
+
+ARG ARCH
+ARG DEBIAN_FRONTEND=noninteractive
+ENV SRC_DIR='/usr/src'
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+RUN apt update && apt install -y git curl vim sudo
+
+
+RUN cd /usr/src/ && git clone -b branch-24.03 --depth=1 https://github.com/ovn-org/ovn.git && \
+    cd ovn && \
+    # change hash type from dp_hash to hash with field src_ip
+    curl -s https://github.com/kubeovn/ovn/commit/4b2d0bffda64fcfca876fe62a02486d7927c1162.patch | git apply && \
+    # modify src route priority
+    curl -s https://github.com/kubeovn/ovn/commit/3dbceb75c5e23d8d5b555e5d87238d40cb557424.patch | git apply && \
+    # fix reaching resubmit limit in underlay
+    curl -s https://github.com/kubeovn/ovn/commit/6bf6df6da5d6fefae742856e6f43dd672360e48d.patch | git apply && \
+    # ovn-controller: do not send GARP on localnet for Kube-OVN ports
+    curl -s https://github.com/kubeovn/ovn/commit/5fd40530728f98011d2cd852d09ee16d4907cc1d.patch | git apply
+
+RUN apt install -y build-essential fakeroot \
+    autoconf automake bzip2 debhelper-compat dh-exec dh-python dh-sequence-python3 dh-sequence-sphinxdoc \
+    graphviz iproute2 libcap-ng-dev libdbus-1-dev libnuma-dev libpcap-dev libssl-dev libtool libunbound-dev \
+    openssl pkg-config procps python3-all-dev python3-setuptools python3-sortedcontainers python3-sphinx \
+    libjemalloc-dev python3-pip libibverbs1 libibverbs-dev ibverbs-providers libsystemd-dev kmod meson
+
+RUN pip3 install ninja pyelftools
+
+
+RUN cd /usr/src/ && \
+    git clone http://192.168.2.114/PRD/DSPG/DDPT/generic_nic_framwork.git -b develop && \
+    cd /usr/src/generic_nic_framwork/app/doe/lib && \
+    make && \
+    make install && \
+    cd /usr/src/generic_nic_framwork/linux_kernel && \
+    sudo mkdir -p /opt/yusur/hados/include && \
+    sudo cp ./user_include/* /opt/yusur/hados/include
+
+
+RUN cd /usr/src/ && \
+    git clone http://192.168.2.114/PRD/DSPG/NAPT/yusur_ovs.git -b ysk2_develop
+
+
+
+RUN cd /usr/src/ && \
+    git clone http://192.168.2.114/PRD/DSPG/Common/yusur_dpdk.git -b ysk2_develop && \
+    cd yusur_dpdk && \
+    meson build -Dprefix=/usr -Dbindir=/usr/bin -Dcpu_instruction_set=generic -Denable_ysk2_flow=true -Denable_ysk2_bond=true && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig
+
+RUN cd /usr/src/yusur_ovs && \
+    ./boot.sh && \
+    ./configure --with-dpdk=shared --enable-ssl --prefix=/usr --sysconfdir=/etc --localstatedir=/var --libdir=/usr/lib64 && \
+    echo override_dh_shlibdeps: >> /usr/src/yusur_ovs/debian/rules && \
+    echo "\tdh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info" >> /usr/src/yusur_ovs/debian/rules && \
+    export DPDK_DIR=/usr/src/yusur_dpdk && \
+    CONFIGURE_OPTS='export CFLAGS="-g -O2 -DALLOW_EXPERIMENTAL_API -DENABLE_YSK2_MERGEFLOW"' && \
+    DATAPATH_CONFIGURE_OPTS='--prefix=/usr' EXTRA_CONFIGURE_OPTS=$CONFIGURE_OPTS make debian-deb
+
+RUN cd /usr/src/ovn && \
+    sed -i 's/OVN/ovn/g' debian/changelog && \
+    rm -rf .git && \
+    ./boot.sh && \
+    CONFIGURE_OPTS='--with-ovs-build=/usr/src/ovs/_debian CFLAGS="-fPIC"' && \
+    if [ "$ARCH" = "amd64" ]; then CONFIGURE_OPTS="--with-ovs-build=/usr/src/ovs/_debian CFLAGS='-O2 -g -msse4.2 -mpopcnt -fPIC'"; fi && \
+    OVSDIR=/usr/src/ovs EXTRA_CONFIGURE_OPTS=$CONFIGURE_OPTS DEB_BUILD_OPTIONS='parallel=8 nocheck' fakeroot debian/rules binary
+
+RUN mkdir /packages/ && \
+    cp /usr/src/openvswitch-*deb /packages && \
+    cp /usr/src/python3-openvswitch*deb /packages && \
+    cp /usr/src/ovn-*deb /packages && \
+    cd /packages && rm -f *source* *doc* *datapath* *docker* *vtep* *test* *dev*
+
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+RUN apt update && apt upgrade -y && apt install ca-certificates python3 hostname libunwind8 netbase \
+        ethtool iproute2 ncat libunbound8 procps libatomic1 kmod iptables python3-netifaces python3-sortedcontainers \
+        tcpdump ipvsadm ipset curl uuid-runtime openssl inetutils-ping arping ndisc6 conntrack iputils-tracepath \
+        logrotate dnsutils net-tools strongswan strongswan-pki libcharon-extra-plugins \
+        libcharon-extauth-plugins libstrongswan-extra-plugins libstrongswan-standard-plugins \
+        python3-pip build-essential libssl-dev libibverbs-dev libnuma-dev libpcap-dev -y --no-install-recommends && \
+        rm -rf /var/lib/apt/lists/* && \
+        rm -rf /etc/localtime
+
+RUN pip3 install meson ninja pyelftools
+
+RUN mkdir -p /var/run/openvswitch && \
+    mkdir -p /var/run/ovn && \
+    mkdir -p /etc/cni/net.d && \
+    mkdir -p /opt/cni/bin
+
+ARG ARCH
+ARG DPDK_VERSION=23.11.1
+ARG CNI_VERSION=v1.5.1
+RUN curl -sSf -L --retry 5 https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${ARCH}-${CNI_VERSION}.tgz | tar -xz -C . ./loopback ./portmap ./macvlan
+
+COPY --from=ovs-builder /usr/src/dpdk-stable-${DPDK_VERSION} /usr/src/dpdk-stable-${DPDK_VERSION}
+
+RUN cd /usr/src/dpdk-stable-${DPDK_VERSION} && \
+    rm -rf ./build && \
+    meson build && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig && \
+    rm -rf /usr/src/dpdk-stable-${DPDK_VERSION}
+
+RUN --mount=type=bind,target=/packages,from=ovs-builder,source=/packages  \
+    dpkg -i --ignore-depends=dpdk /packages/*.deb
+
+RUN cp /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk /usr/sbin/ovs-vswitchd
