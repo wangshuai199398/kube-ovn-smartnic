@@ -12,6 +12,8 @@ RUN apt update && apt upgrade -y && apt install ca-certificates python3 hostname
         rm -rf /var/lib/apt/lists/* && \
         rm -rf /etc/localtime
 
+RUN yum install -y gcc kernel-devel kernel-headers cjson
+
 RUN apt update && apt upgrade -y && apt-get -y install linux-headers-`uname -r` libelf-dev \
         linux-headers-generic libcjson1 libarchive13
 
@@ -29,7 +31,7 @@ RUN curl -sSf -L --retry 5 https://github.com/containernetworking/plugins/releas
 # dpkg -i hados-unic-doe-k2pro_1.5.7-ubuntu22.04_all.deb
 # dpkg -i hados-unic-k2pro-smartnic_1.5.7-ubuntu22.04_all.deb
 RUN cd /opt/yusur/repo && \
-    curl -o hados.deb  "http://192.168.2.151/?explorer/share/file&hash=663dT5hoh9aafMefAau2OQe7n2xF5K_cn4h6Y_0QrZgYUnalhfayZG5iOctMEGQ1PX05DHU&name=/hados-conflux2200e-daily_1.0.0-9159e.dev.ubuntu22.04_amd64.deb" && \
+    wget -O 'hados-conflux2200e-daily-1.0.0-9159e.dev.el8.x86_64.rpm' 'http://pan.yusur.tech/?explorer/share/file&hash=27159CX5wPfSlFZWXp_bS-hf5xSXIahn2JjU74jOpyfhR-TAkbz3JZuVrs3j5oa6Pejn10s' && \
     dpkg -i hados.deb && \
     rm -fr hados.deb && \
     dpkg -i hados-unic-common_1.5.7-ubuntu22.04_all.deb && \

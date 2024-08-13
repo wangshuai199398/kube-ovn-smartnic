@@ -11,7 +11,8 @@ data:
                 "resourcePrefix": "yusur.tech",
                 "selectors": {
                     "vendors": ["1f47"],
-                    "devices": ["1101"]
+                    "devices": ["1101"],
+                    "pfNames": ["enp1s0f0"]
                 }}
         ]
     }
